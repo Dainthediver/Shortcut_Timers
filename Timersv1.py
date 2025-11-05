@@ -27,19 +27,49 @@ def show_status(text, color="green", timeout=3000):
         show_status.after_id = root.after(timeout, lambda: label_message.config(text="Ready", fg="green"))
 
 
-# === ACTIVATE OBS (RELIABLE) ===
+# === ACTIVATE OBS (IMPROVED) ===
 def activate_obs():
     prefix = entry_window.get().strip() or "OBS"
     windows = gw.getAllTitles()
+    
+    # Find the OBS window
+    obs_window = None
     for title in windows:
-        if title.lower().startswith(prefix.lower()):
-            win = gw.getWindowsWithTitle(title)[0]
-            win.activate()
-            time.sleep(1)
-            show_status("Activated OBS", "green", 2000)
-            return True
-    show_status("Error", f"No window starting with '{prefix}' found.")
-    return False
+        if title and title.lower().startswith(prefix.lower()):
+            try:
+                wins = gw.getWindowsWithTitle(title)
+                if wins:
+                    obs_window = wins[0]
+                    break
+            except Exception:
+                continue
+    
+    if not obs_window:
+        show_status(f"No window starting with '{prefix}' found.", "red")
+        return False
+    
+    try:
+        # Restore if minimized
+        if obs_window.isMinimized:
+            obs_window.restore()
+            time.sleep(0.3)
+        
+        # Bring to front and activate
+        obs_window.activate()
+        time.sleep(0.5)
+        
+        # Verify activation (try again if needed)
+        if not obs_window.isActive:
+            obs_window.activate()
+            time.sleep(0.5)
+        
+        show_status("Activated OBS", "green", 2000)
+        return True
+        
+    except Exception as e:
+        show_status(f"Failed to activate: {e}", "red")
+        return False
+
 
 # === SEND HOTKEY ===
 def send_keys(keys):
@@ -102,7 +132,6 @@ def run_session():
             # === START RECORDING ===
             if current == start_time_sec:
                 if activate_obs():
-                    activate_obs()
                     send_keys(start_shortcut)
                     show_status("RECORDING STARTED!", "lime", 3000)
                 else:
@@ -111,9 +140,10 @@ def run_session():
             # === STOP RECORDING ===
             if current == end_time_sec:
                 if activate_obs():
-                    activate_obs()
                     send_keys(stop_shortcut)
                     show_status("RECORDING STOPPED!", "red", 3000)
+                else:
+                    show_status("Failed to stop OBS", "red")
                 break
 
             time.sleep(1)

@@ -1,0 +1,9 @@
+# local settings - may contain the OBS WebSocket password
+timer_settings.json
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.log

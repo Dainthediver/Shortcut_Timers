@@ -7,3 +7,8 @@ __pycache__/
 .venv/
 venv/
 *.log
+
+# PyInstaller
+build/
+dist/
+OBS-Session-Timer-debug.spec

@@ -15,6 +15,7 @@ monitor 1, timer wherever you want it.
 | `test_win32_stub.py` | Runs the Windows code path on any OS with a stubbed user32. |
 | `smoke_ui.py` | Headless end-to-end: real Tk UI + fake OBS + real clock, asserts a 1s→3s session records for ~2s. |
 | `Timersv1.py` | Original pygetwindow version, kept for reference. |
+| `pytoexe_guide.md` | How to build the `.exe` in VS Code (PyInstaller walkthrough). |
 
 ## Why v2 exists
 
@@ -53,8 +54,9 @@ foregrounding, and the window's original rect restored afterwards).
    *Start Session*, `H:MM:SS`), pick the monitor this timer window should live
    on, then *Start Session*.
 
-Settings are saved to `timer_settings.json` next to the script (git-ignored —
-it holds the WebSocket password in plain text).
+Settings are saved to `timer_settings.json` next to the script — or next to the
+`.exe` in a packaged build (git-ignored — it holds the WebSocket password in plain
+text).
 
 ### Control modes
 
@@ -93,6 +95,19 @@ it holds the WebSocket password in plain text).
   bare numbers are seconds (`900` = 15 minutes).
 * Start/stop hotkeys are validated before anything is dispatched (a shortcut
   must end in a non-modifier key).
+
+## Building a standalone .exe
+
+See **[`pytoexe_guide.md`](pytoexe_guide.md)** — full VS Code + PyInstaller
+walkthrough (venv, console build, windowed release build, spec file, troubleshooting).
+In short, from the repo root in a venv with `pyinstaller` installed:
+
+```
+pyinstaller --noconfirm --clean "OBS Session Timer.spec"
+```
+
+The result is `dist\OBS Session Timer.exe` — one file, no Python needed at runtime.
+A copy of `OBS Session Timer.spec` is committed, so the recipe is the same every time.
 
 ## Tests
 

@@ -38,9 +38,22 @@ from tkinter import messagebox, ttk
 import win_layout as wl
 from obs_ws import OBSAuthError, OBSRequestError, ObsClient, WSError
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.0.1"
 APP_TITLE = "OBS Session Timer v%s" % APP_VERSION
-SETTINGS_PATH = Path(__file__).with_name("timer_settings.json")
+
+# Where timer_settings.json lives.
+#
+# Running as a normal .py  -> next to this source file.
+# Running as a frozen .exe -> next to the .exe.
+#
+# Do NOT use Path(__file__) when frozen: PyInstaller's --onefile build unpacks
+# the script into %TEMP%\_MEIxxxxxx, so __file__ points in there and the folder
+# is deleted when the app exits -- settings (including the OBS password) would
+# silently reset on every launch. sys.executable is the exe's real path.
+if getattr(sys, "frozen", False):
+    SETTINGS_PATH = Path(sys.executable).with_name("timer_settings.json")
+else:
+    SETTINGS_PATH = Path(__file__).with_name("timer_settings.json")
 
 DEFAULTS = {
     "window_prefix": "OBS",

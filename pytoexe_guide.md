@@ -12,7 +12,7 @@ Checked against the code in this repo, so you don't guess:
 
 | Item | Value |
 | --- | --- |
-| Entry point | `Timersv2.py` (`if __name__ == "__main__":` at line 750) |
+| Entry point | `Timersv2.py` (`if __name__ == "__main__":` near the end, line 763) |
 | Third-party deps | **none** — stdlib + tkinter only |
 | Bundled local modules | `obs_ws.py`, `win_layout.py` (imported by `Timersv2.py`) |
 | Data files / assets | **none** |
@@ -21,45 +21,117 @@ Checked against the code in this repo, so you don't guess:
 Because `Timersv2.py` imports `obs_ws` and `win_layout`, PyInstaller follows those
 imports and bundles them automatically. **No `--hidden-import` flags, no
 `--add-data`, no spec editing required** to get a working exe. Everything below
-past step 1 is the build loop.
+past step 1 is the build loop (and step 1 is already done for you).
 
 > PyInstaller does not cross-compile. A Windows `.exe` must be built **on
 > Windows**. Building on Linux/macOS produces a Linux/macOS binary.
 
 ---
 
-## 1. Required code change before you freeze it (settings will not persist otherwise)
+## 1. The settings-path fix — already applied, read this to understand it
 
-This is the one real gotcha in this repo. Line 43:
+> **Status: done.** Commit `968d389` + the follow-up commit in this repo changed
+> `Timersv2.py` for you and bumped `APP_VERSION` to `2.0.1`. You do **not** have to
+> type or paste any code from this section. Read it so you know why the file looks
+> the way it does, and so you don't accidentally undo it later.
+
+### The one line that mattered
+
+Original line 43 of `Timersv2.py`:
 
 ```python
 SETTINGS_PATH = Path(__file__).with_name("timer_settings.json")
 ```
 
-In a `--onefile` exe, `__file__` points into a temporary extraction folder
-(`%TEMP%\_MEIxxxxxx`). That folder is **deleted when the app exits**. Verified
-behaviour, not theory:
+`SETTINGS_PATH` is simply **where the app saves its settings file** —
+`timer_settings.json`, which holds the OBS WebSocket port, the password, your start
+and stop offsets, and your shortcuts. Saving and loading both use this one variable.
+
+`__file__` is a Python built-in meaning **"the path of the file I am running
+from"**. So that line reads as: *"save my settings next to the script that's
+executing right now."* That is correct when you run `python Timersv2.py`. It is
+wrong once the code is inside an exe.
+
+### Why an exe breaks it
+
+A `--onefile` exe is not "the script". It's a small launcher with the whole app
+compressed inside it. Every time you double-click it, it does this:
+
+1. Picks a brand-new empty folder in `%TEMP%`, named something like `_MEI123456`.
+2. Unpacks your `.py`, `obs_ws.py`, `win_layout.py` and the Python runtime into it.
+3. Runs `Timersv2.py` **from that temp folder** — so `__file__` points there.
+4. Deletes the temp folder when the app closes.
+
+So with the original line, the app writes `timer_settings.json` into
+`%TEMP%\_MEI123456\` instead of next to your exe — and Windows wipes it minutes
+later. This is the real output of a frozen build, measured, not guessed:
 
 ```
 frozen     : True
 __file__   : C:\Users\Dain\AppData\Local\Temp\_MEI123456\Timersv2.py
-Path(__file__).with_name -> ...\_MEI123456\timer_settings.json   ← wiped on exit
+Path(__file__).with_name -> ...\_MEI123456\timer_settings.json   ← deleted on exit
 ```
 
-Result: the port, password, offsets, and shortcuts would reset to defaults every
-time you launch the exe.
+**What that looks like from the outside:** everything works the first time. You
+paste your OBS password, tick *Test connection*, it goes green, you close the app.
+Next launch — port back to `4455`, password box empty, offsets back to
+`00:00:05`/`00:15:00`. It reads like the app "forgot" its settings, or like you
+never clicked Save. Nothing is broken in the save code; it saved perfectly, into a
+folder that no longer exists.
 
-**Fix — replace line 43 with:**
+### What the fix does
+
+It asks one question at startup: *am I a `.py` or an `.exe`?* PyInstaller sets
+`sys.frozen = True` in the exe (and leaves it unset when you run the script), so:
 
 ```python
-if getattr(sys, "frozen", False):          # running as a frozen exe
+# Where timer_settings.json lives.
+#
+# Running as a normal .py  -> next to this source file.
+# Running as a frozen .exe -> next to the .exe.
+#
+# Do NOT use Path(__file__) when frozen: PyInstaller's --onefile build unpacks
+# the script into %TEMP%\_MEIxxxxxx, so __file__ points in there and the folder
+# is deleted when the app exits -- settings (including the OBS password) would
+# silently reset on every launch. sys.executable is the exe's real path.
+if getattr(sys, "frozen", False):
     SETTINGS_PATH = Path(sys.executable).with_name("timer_settings.json")
-else:                                       # running as a .py
+else:
     SETTINGS_PATH = Path(__file__).with_name("timer_settings.json")
 ```
 
-`sys` is already imported at line 30, so nothing else changes. Settings then live
-next to the exe, which is what you want.
+| Piece | Meaning |
+| --- | --- |
+| `getattr(sys, "frozen", False)` | `True` inside a PyInstaller/Nuitka exe, `False` when running the `.py`. `getattr` with a default avoids `AttributeError` when the attribute doesn't exist. |
+| `sys.executable` | The actual file being run: `...\python.exe` normally, your `OBS Session Timer.exe` when frozen. Unlike `__file__`, it never points into the temp folder. |
+| `.with_name(...)` | "Take the folder this file is in, and put `timer_settings.json` in that same folder." |
+
+Result, same folder in both cases — settings survive restarts, and they sit beside
+the exe where you can find and back them up.
+
+### Finding it in VS Code
+
+`Ctrl+G` → type `41` → `Enter` jumps straight to `APP_VERSION`, and the block above
+is immediately below it. To see the whole thing in context, read lines 41–55. `sys`
+was already imported at line 31, so no new imports were needed.
+
+### Verify it after your first build (30 seconds)
+
+1. Build and launch the exe once, then close it.
+2. Look in the `dist` folder next to `OBS Session Timer.exe` — `timer_settings.json`
+   must be **there**.
+3. Change a setting (e.g. the stop offset), close, reopen. The change must still be
+   there.
+
+If the file instead appears under `%TEMP%\_MEI*`, this block got reverted.
+
+> **If you ever move the exe into `C:\Program Files\`**, that folder is
+> read-only for normal users and saving next to the exe will fail. Either keep the
+> exe somewhere user-writable (Desktop, `C:\Tools\`, `%LOCALAPPDATA%`) or change the
+> frozen branch to
+> `Path(os.getenv("LOCALAPPDATA")) / "OBSSessionTimer" / "timer_settings.json"`
+> and `mkdir(parents=True, exist_ok=True)` before writing. For a personal tool on
+> your own desktop, next-to-the-exe is the right call.
 
 ---
 
@@ -163,8 +235,8 @@ Create `version_info.txt`:
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(2, 0, 0, 0),
-    prodvers=(2, 0, 0, 0),
+    filevers=(2, 0, 1, 0),
+    prodvers=(2, 0, 1, 0),
     mask=0x3f, flags=0x0, OS=0x40004,
     fileType=0x1, subtype=0x0, date=(0, 0)
   ),
@@ -173,11 +245,11 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'Dain Wyman'),
         StringStruct('FileDescription', 'OBS Session Timer'),
-        StringStruct('FileVersion', '2.0.0.0'),
+        StringStruct('FileVersion', '2.0.1.0'),
         StringStruct('InternalName', 'OBS-Session-Timer'),
         StringStruct('OriginalFilename', 'OBS Session Timer.exe'),
         StringStruct('ProductName', 'OBS Session Timer'),
-        StringStruct('ProductVersion', '2.0.0.0')
+        StringStruct('ProductVersion', '2.0.1.0')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
@@ -186,7 +258,8 @@ VSVersionInfo(
 ```
 
 Add `--version-file version_info.txt` to the build command. Bump both the tuple
-and the string when you bump `APP_VERSION` in `Timersv2.py` (currently `2.0.0`).
+and the string when you bump `APP_VERSION` in `Timersv2.py` (currently `2.0.1`, so the
+exe reports `2.0.1.0`).
 
 ---
 
@@ -277,7 +350,7 @@ behaviour is right.
 | --- | --- |
 | `ModuleNotFoundError: No module named 'obs_ws'` | You built from a different folder than `Timersv2.py`. Run `pyinstaller` with the repo as the working directory. |
 | Exe launches and vanishes instantly (windowed build) | Rebuild `--console` and run it in a terminal — the traceback appears there. |
-| Settings/password reset every launch | Step 1 not applied. `timer_settings.json` is being written into the temp `_MEI` dir. |
+| Settings/password reset every launch | The step 1 block was reverted/overwritten. `timer_settings.json` is being written into the temp `_MEI` dir — check lines 41–55 of `Timersv2.py`. |
 | Windows: *"Windows protected your PC"* (SmartScreen) | Unsigned exe. **More info → Run anyway.** Persistent fix is code signing (below). |
 | Antivirus quarantines the exe | Common `--onefile` false positive (the bootloader self-extracts). Add an exclusion for `dist\`, or switch to `--onedir`. |
 | 3–8 s delay before the window appears | `--onefile` extracts to `%TEMP%` on every launch. Use `--onedir` (a folder instead of one file) — starts instantly, still no Python needed. |
@@ -296,7 +369,7 @@ through SmartScreen once.
 
 ## 9. Final checklist
 
-- [ ] Settings path fix applied (step 1), `timer_settings.json` appears next to the exe
+- [ ] Settings-path fix still in place (lines 41–55), and `timer_settings.json` appears next to the exe after one launch
 - [ ] `python Timersv2.py` runs clean from source
 - [ ] Console build tested against real OBS: Test connection, start, auto-stop, cancel
 - [ ] Windowed build launches with no console and no flash-and-die
